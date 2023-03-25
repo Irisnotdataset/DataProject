@@ -1,0 +1,471 @@
+---
+title: "36-402 DA Exam One"
+author: "yuehu"
+date: "3/24/2023"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+linestretch: 1.241
+fontsize: 12pt
+fontfamily: mathpazo
+---
+
+
+# Introduction
+
+**1**
+
+We're interested in knowing whether the absence of PBC votes for Buchanan in the 2000 presidential election would have made
+a statistically significant difference in the result, and if he would have received more votes with the absence of butterfly ballot. Given in-
+depth information and data from about 67 counties, we will to answer the following three questions. 
+(1)whether the votes in PBC county has been statistically significant for Buchanan.
+(2) If such difference 
+between the proportion of election day votes for Buchanan
+and the proportion of absentee votes for Buchanan in PBC larger than what we would expect
+by chance. 
+(3) Many blame this for butterfly ballot, so assuming votes were miscast for Buchanan, how many
+more votes did he receive than he would have in the absence of the butterfly ballot.
+
+**2**
+
+We're going to use two datasets. One includes the votes of Florida counties, so called countyFL, the
+other one is the ballot data, which contains voting specifically using ballot.
+countyFL dataset has 67 rows and 6 variables, with each row representing the voting of each county
+with Florida. The 6 variables are:  "county","goreVotes","bushVotes", "buchananVotes","absVotes","absBuchanan",
+with the first three variables denoting the votes casted to each candidate, while abs means the votes that
+are absent of ballot. While ballot dataset shows how an individual voted in both the presidential 
+and US senatorial races.There are 417861 observations with 4 variables, each representing
+whether the vote is casted for Buchanan, Nelson or Deckard and whether the votes is absent.
+
+**3**
+
+After performing analysis, we also find that Buchanan has received surprisingly more votes, and which is not likely
+by chance. The difference is over 2000.
+
+# Exploratory Data Analysis
+
+**1** 
+
+We first create four new variables for the county-level data:
+i. `totalVotes`, which takes the total number of election day votes for either Bush, Buchanan, or Gore
+ii. `buchananVotesProp` which divides `buchananVotes` by `totalVotes`, this is the proportion of election day votes for Buchanan in the county;
+iii. `absBuchananVotesProp` which divides `absBuchanan` by `absVotes`, this is the proportion of absentee votes for Buchanan in the county;
+iv. `absBuchananDiff` which takes the difference between the proportion of election day votes for Buchanan and the proportion of absentee votes for Buchanan
+```{r,include = FALSE}
+county_data<-read.csv("countyFL.csv")
+```
+
+```{r,include = FALSE}
+county_data$totalVotes <- county_data$bushVotes + county_data$buchananVotes+county_data$goreVotes
+county_data$buchananVotesProp <- county_data$buchananVotes / county_data$totalVotes
+county_data$absBuchananVotesProp <- county_data$absBuchanan / county_data$absVotes
+county_data$absBuchananDiff <- county_data$buchananVotesProp - county_data$absBuchananVotesProp
+```
+
+**2**
+
+```{r,include=FALSE}
+summary(county_data)
+```
+
+```{r,echo=FALSE,fig.width=6, fig.height=6, fig.cap="Histograms of variables"}
+par(mfrow=c(3,3))
+for(i in 2:ncol(county_data)){
+  hist(county_data[,i],xlab=colnames(county_data)[i],main=paste("Histogram of ",colnames(county_data)[i]))
+}
+```
+
+We then conduct some EDA on the data.
+From the histogram of the marginal distribution of all variables, we can see that most of them are very skewed and have long right tail.This can also be justified from summary statistics, where each variable has a large difference in its mean and median. Therefore, given such skewness, we might consider performing log transformation to make the variables approximately normally distributed
+
+
+**3**
+```{r,echo=FALSE,fig.width=4, fig.height=4, fig.cap="Histograms of absBuchananDiff"}
+#summary(county_data$absBuchananDiff)
+hist(county_data$absBuchananDiff,xlab="absBuchananDiff",main="Histogram of absence Buchanan Vote proportion difference")
+```
+
+The response variable is absBuchananDiff. From the histogram we can see that it is not very normally distributed. There seem to have some skewness with a right tail a outlier with a value of ~0.016
+
+**4**
+```{r,echo=FALSE,fig.width=6, fig.height=6, fig.cap="Paired plot of variables"}
+pairs(subset(county_data,select=-c(county)),panel=function(x,y){
+  points(x,y)
+  abline(lm(y~x), col='red')
+})
+```
+
+From the pairs plot we can see that, in terms of the relationship with the response variable absBuchananDiff, except for BuchananVotesProp and AbsBuchananVotesProp, the rest do not exhibit a clear linear relationship. This indicates that the linearity assumption is very likely to be violated. Meanwhile, the five variables in our original dataset and totalVotes exhibit very strong collinearlity with each other. This also violates our assumption for a linear model.
+
+**5**
+   
+```{r,include = FALSE}
+transformed<-data.frame(log(subset(county_data,select=-c(county))+1))
+head(transformed)
+```
+
+```{r,echo=FALSE,fig.width=6, fig.height=6, fig.cap="Paired plots of transformed variables"}
+pairs(transformed,panel=function(x,y){
+  points(x,y)
+  abline(lm(y~x), col='red')
+})
+```
+
+The pairs plot also have a more clear pattern in terms of the relationship with the response. We can see that now every other variables have a weak negative linear correlation with the response while buchananvotesprop have a very strong positive linear relationship. However, the collinearity persist. In order to safely make inference, we might not want to include many covariates with strong collinearity.
+
+```{r,echo=FALSE,fig.width=6, fig.height=6, fig.cap="Histograms of variables"}
+par(mfrow=c(3,3))
+for(i in 1:ncol(transformed)){
+  hist(transformed[,i],xlab=colnames(transformed)[i],main=paste("Histogram of ",colnames(transformed)[i]))
+}
+```
+
+Since the variables are very skewed, we will do log transformation in this case. Above are the marginal histograms and pairs plots of variables after transformation. We can see that most variables are not skewed anymore except for the proportional variables and the response. They seem to not change in terms of distribution. BushVotes, AbsVotes, and TotalVotes show some bimodal after transformation. 
+
+
+**6**
+```{r,include = FALSE}
+ballot<- read.csv("ballotPBC.csv")
+```
+
+
+```{r,include = FALSE}
+library(tidyverse)
+summary_table <- ballot%>%
+  group_by(ballot_type = ifelse(isabs == 1, "Absentee", "Non-absentee"),
+           candidate = ifelse(inelson == 1, "Nelson", ifelse(ideckard == 1, "Deckard", "Neither"))) %>%
+  summarize(votes_for_buchanan = sum(ibuchanan),
+            votes_not_for_buchanan = sum(ifelse(ibuchanan == 1, 0, 1)))
+```
+
+```{r,include=FALSE}
+library(data.table)
+```
+
+```{r,echo=FALSE,fig.width=4, fig.height=4, fig.cap="Summary Table"}
+as.data.table(summary_table)
+```
+From this table, we can get a sense of the conditional distribution of votes given ballot type and candidate
+
+**7**. 
+
+For county-level dataset, we can see that the collinearity issue have been very severe. This indicates that the individual votes are not independent and must have some covariates that cause such a collinearity. This can partly be answered by the ballot-level data. Compared to Nelson or neither one between the two, if a person a not absent and vote for Deckard, they're more likely to vote for Buchanan. This is the same case with absentees. However, on the other side, given absentee, the total votes for buchanan are relatively few. This might indicate that being absent might not affect Buchanan's votes by that much.
+
+# Modeling & Diagnostics
+
+**1** 
+
+We will fit three models to assess the regression
+  
+I choose log transformed goreVotes and absBuchananVotesProp as our predictor.
+I choose goreVotes because it's relatively weak linear relationship, but the fit is already better than the others. I perform a log transformation because of its skewness.
+Then I'll pick other ones that do not have a strong collinearity with goreVotes and do not take into account of BuchananVotes. Therefore I choose absBuchanaVotesProp due to its linear relationship with the response and very weak collinearity with the goreVotes. I do not perform a log transformation because it does not help with the skewness. So we'll keep it as simple as possible.
+
+We first fit a a linear model
+
+```{r,include=FALSE}
+county_data$loggoreVotes<-log(county_data$goreVotes)
+county <- county_data[county_data$county != "Palm Beach", ]
+county
+```
+
+
+```{r,include=FALSE}
+lr<- lm(absBuchananDiff ~loggoreVotes+absBuchananVotesProp, data=county)
+summary(lr)
+```
+
+
+Then we will do a kernel regression, with bandwidths for each predictor chosen as the sample standard deviation of the predictor divided by n^(1/5), where n is the number of data points.
+```{r,include=FALSE}
+library(np)
+n<-nrow(county)
+X <- county[, c("absBuchananVotesProp", "loggoreVotes")]
+y <- county$absBuchananDiff
+bw1 <- sd(X[, 1]) / n^(1/5)
+bw2 <- sd(X[, 2]) / n^(1/5)
+kr<- npreg(y ~ absBuchananVotesProp+loggoreVotes,data=X, bw =c(bw1,bw2))
+summary(kr)
+```
+  
+
+Finally, we will fit a smoothing spline with a single predictor loggoreVotes
+
+I choose loggoreVotes because the datapoints are more scattered with a distinct fit, while absBuchananProp has many data points centered at lower x-value.
+
+```{r,echo=FALSE,fig.width=4, fig.height=3, fig.cap="Smoothing Spline"}
+sp<-smooth.spline(county$loggoreVotes,county$absBuchananDiff)
+
+plot(county$loggoreVotes, county$absBuchananDiff, col="gray50")
+lines(sp$x, sp$y, col="red", lwd=2)
+
+```
+
+
+**2**. 
+
+Then, let's assess the diagonistics
+
+For linear model:
+
+```{r,echo=FALSE,fig.width=4, fig.height=4, fig.cap="Linear Model Diagnostics"}
+par(mfrow=c(2,2))
+resid<-residuals(lr)
+fit<-fitted(lr)
+plot(lr)
+```
+
+There seem to be a slight nonlinear trend in residuals vs fitted plot. The equal variance assumption also does not hold very well because more data on the left with x-value less than 0.002. Residuals center around 0 indicates 0 mean. The qq-plot indicates that although most points fall on the line, there're still some outliers with concerns for not perfecting meeting the assumption of normality.
+
+```{r,echo=FALSE,fig.width=4, fig.height=2, fig.cap="Model Diagnostics"}
+par(mfrow=c(1,2))
+plot(county$loggoreVotes,resid,xlab="loggoreVotes",main="Residuals vs loggoreVotes")
+plot(county$absBuchananVotesProp,resid,xlab="AbsBuchananVotesProp",main="Residuals vs AbsBuchananVotesProp")
+```
+
+Clearly, residuals show a fan shape on both predictors, indicating non-equal variance.
+
+```{r,echo=FALSE,fig.width=4, fig.height=4, fig.cap="Kernal Model Diagnostics"}
+par(mfrow = c(2, 2))
+y_pred1 <- predict(kr, newdata=X)
+res_kr<-y - y_pred1
+plot(y_pred1, res_kr, xlab = "Fitted values", ylab = "Residuals", main = "Residual Plot")
+
+qqnorm(res_kr)
+qqline(res_kr)
+
+plot(county$loggoreVotes, res_kr, xlab = "LoggoreVotes", ylab = "Residuals", main = "Residual vs LoggoreVotes")
+plot(county$absBuchananVotesProp, res_kr, xlab = "absBuchananVotesProp", ylab = "Residuals", main = "Residual vs absBuchananVotesProp")
+```
+
+In kernel regression, the problem continue persists with the case in linear regression. Distinct outliers observed from residual plots and fan shapes indicate non-equal variance.
+
+```{r,include=FALSE}
+par(mfrow = c(2, 2))
+y_pred2 <- predict(sp,x=county$loggoreVotes)
+```
+
+```{r,echo=FALSE,fig.width=4, fig.height=4, fig.cap="Spline Model Diagnostics"}
+par(mfrow = c(2, 2))
+res_sp<-y-y_pred2$y
+plot(y_pred2$y, res_sp, xlab = "Fitted values", ylab = "Residuals", main = "Residual Plot")
+
+qqnorm(res_sp)
+qqline(res_sp)
+
+plot(county$loggoreVotes, res_sp, xlab = "LogtotalVotes", ylab = "Residuals", main = "Residual vs LoggoreVotes")
+plot(county$absBuchananVotesProp, res_sp, xlab = "absBuchananVotesProp", ylab = "Residuals", main = "Residual vs absBuchananVotesProp")
+```
+
+In smoothing spline, the problem continue persists with the case in linear regression. Distinct outliers observed from residual plots and fan shapes indicate non-equal variance.However, the variance seem to be smaller compared to previous models
+
+To deal with such problem of unequal-variance, I would suggest examining the outliers first, and then given a slight nonlinearity trend, examine whether it's indeed linear. Making many assumptions might not result in a good model.
+
+**3**. 
+
+Let's then see how the models performance on predicting our response variable.
+
+In this case, we will use LOOCV to find the best model. Since our dataset is very situational based and might not be able to generalize, we can simply LOOCV in order to get the lowest bias.
+
+```{r,include=FALSE}
+LOOCVError<-matrix(nrow=nrow(county),ncol=3)
+for(i in 1:nrow(county)){
+  county_i<-county[-i,]
+  model1_i<-lm(absBuchananDiff~absBuchananVotesProp+loggoreVotes, data=county_i)
+  pred_model1_i<-predict(model1_i,newdata=county[i,])
+  model2_i<-npreg(absBuchananDiff~ absBuchananVotesProp+loggoreVotes,data=county_i, bw=c(bw1,bw2))
+  pred_model2_i<-predict(model2_i,newdata=county[i,])
+  model3_i<-smooth.spline(county_i$loggoreVotes,county_i$absBuchananDiff)
+  pred_model3_i<-predict(model3_i,x=county[i,]$loggoreVotes)
+  LOOCVError[i,1] <- county$absBuchananDiff[i] - pred_model1_i
+  LOOCVError[i,2] <- county$absBuchananDiff[i] - pred_model2_i
+  LOOCVError[i,3]<- county$absBuchananDiff[i]-pred_model3_i$y
+}
+```
+
+```{r,include=FALSE}
+loocvs <- colMeans(LOOCVError^2)
+```
+
+```{r,echo=FALSE,fig.width=4, fig.height=4, fig.cap="Table of LOOCV error"}
+LOOCV<-data.frame(model = c("Model 1", "Model 2", "Model 3"),loocv_score = loocvs)
+as.data.table(LOOCV)
+```
+
+Now we have a table indicating the prediction error. In our case, we use LOOCV, and linear regression has the smallest prediction error although they are very close to each other.
+
+**4**
+
+Especially for linear regression and kernal regression, the error rate is so close to each other that it's very unlikely to be significant
+
+**5**
+
+We would choose linear regression model. Not only because it has the smallest prediction error, but is also because it's the simplest and will thus avoid overfitting and large variance.
+However, since the residuals seem a little bit nonlinear and non-equal variance, we would consider using **Resample by case**. It has the fewest constraints on assumptions. In this case, residuals do not have to be iid.
+
+**6**
+
+```{r,echo=FALSE,fig.width=6, fig.height=6, fig.cap="Kernal Model Diagnostics"}
+deckard<-ballot[ballot$ideckard==1,]
+nelson<-ballot[ballot$inelson==1,]
+neither<-ballot[ballot$inelson==0&ballot$ideckard==0,]
+lr1<-lm(ibuchanan~factor(isabs),data=deckard)
+lr2<-lm(ibuchanan~factor(isabs),data=nelson)
+lr3<-lm(ibuchanan~factor(isabs),data=neither)
+plot(1,xlim=c(0,1),ylim=c(0,0.1),xlab="Absense or Not",ylab="Probability of voting for Buchanan",xaxt="n")
+axis(side=1,at=c(0,1))
+lines(ballot$isabs,predict(lr1,newdata=ballot),col="red")
+lines(ballot$isabs,predict(lr2,newdata=ballot),col="blue")
+lines(ballot$isabs,predict(lr3,newdata=ballot),col="green")
+legend("topleft", col=c("red", "blue", "green"), lty=c(1,1,1),
+legend=c("Deckard", "Nelson", "Neither", "x-axis: 0 = voted ", 
+         "x-axis: 1 = absentee vote"))
+```
+
+# Results
+
+**1**
+
+```{r,include=FALSE}
+PBC<-county_data[county_data$county=="Palm Beach",]
+```
+
+```{r,include=FALSE}
+set.seed(1)
+B<-500
+N<-nrow(county)
+```
+```{r,include=FALSE}
+coefs<-vector(length=B) 
+for (b in 1:B) {
+  boots<-sample(N, N, replace = TRUE)
+  tempdata <- county[boots, ]
+  model<- lm(absBuchananDiff~absBuchananVotesProp+loggoreVotes,data=tempdata)
+  coefs[b]<-predict(model,newdata=PBC)
+}
+```
+
+```{r,echo=FALSE,fig.width=4, fig.height=4, fig.cap="Histogram of Coefs"}
+hist(coefs,breaks=50)
+```
+```{r,include=FALSE}
+n <- length(coefs)
+xbar <- mean(coefs)
+s <- sd(coefs)
+margin <- qnorm(0.975)*s
+lower<- xbar - margin
+upper<- xbar + margin
+CI <- data.frame("2.5 %" = lower, "97.5 %" = upper) 
+colnames(CI) <- c("2.5 %", "97.5 %")
+CI
+```
+
+We use a bootstrap of resampling cases of B=500 with the linear regression model. The 95% confidence interval we get is [-0.002481948,-0.0002008312].
+This indicates that the CI covers the true point estimate 95% of the time. We also see from the histogram that the distribution is approximately normal, but only skewed a little bit with a left tail
+
+**2**
+
+```{r,include=FALSE}
+PBC$absBuchananDiff>lower
+PBC$absBuchananDiff<upper
+```
+
+Our difference proportion is outside of the CI range, since the upper range is only -0.0002. It is greater than this range, which indicates that our data point may fall on a different distribution and it's somewhat surprisingly higher than expected.
+
+
+**3**
+
+```{r,include=FALSE}
+non_abs<-nrow(ballot[ballot$isabs==0,])
+prob_nelson<-nrow(nelson[nelson$isabs==0,])/non_abs
+prob_deckard<-nrow(deckard[deckard$isabs==0,])/non_abs
+prob_neither<-nrow(neither[neither$isabs==0,])/non_abs
+
+non_abs_nel<-nrow(nelson[nelson$isabs==0&nelson$ibuchanan==1,])/nrow(nelson[nelson$isabs==0,])
+non_abs_deck<-nrow(deckard[deckard$isabs==0&deckard$ibuchanan==1,])/nrow(deckard[deckard$isabs==0,])
+non_abs_nei<-nrow(neither[neither$isabs==0&neither$ibuchanan==1,])/nrow(neither[neither$isabs==0,])
+
+abs_nel<-nrow(nelson[nelson$isabs==1&nelson$ibuchanan==1,])/nrow(nelson[nelson$isabs==1,])
+abs_deck<-nrow(deckard[deckard$isabs==1&deckard$ibuchanan==1,])/nrow(deckard[deckard$isabs==1,])
+abs_nei<-nrow(neither[neither$isabs==1&neither$ibuchanan==1,])/nrow(neither[neither$isabs==1,])
+
+E_notabs<-non_abs_deck*prob_deckard+non_abs_nel*prob_nelson+non_abs_nei*prob_neither
+E_abs<-abs_deck*prob_deckard+abs_nel*prob_nelson+abs_nei*prob_neither
+
+
+est<-E_notabs-E_abs
+est
+```
+
+Our effect calculated is 0.0063. In order for it to be valid, it has to meet the assumptions of Consistency(that potential outcome is a function of only treatment) and Unconfoundedness (where treat variable is independent of potential outcome given covariate X). Besides, there should be no other confounding variables. In this case, no other senatorial candidates as options or any other factors affecting the outcome.
+
+**4**. 
+
+```{r,include=FALSE}
+0.006377701*PBC$totalVotes
+```
+
+In the absence of the butterfly ballot, the votes are expected to increase by 2717.5 from our calculation. However, we still have make sure that all other factors that could have influenced the vote proportions are balanced between the treatment (Palm Beach County) and control (other counties) groups.
+Besides, although it's only a observational study and can not guarantee randomization, it's also important to make sure that there's no interference between individuals.
+
+**5**
+
+```{r,include=FALSE}
+set.seed(1)
+B <- 500
+nel_coefs <- matrix(NA, nrow = B, ncol = 2)
+deck_coefs <- matrix(NA, nrow = B, ncol = 2)
+nei_coefs <- matrix(NA, nrow = B, ncol = 2)
+for (i in 1:B){
+    nel_boot <- sample(nrow(nelson), nrow(nelson), replace = TRUE)
+    deck_boot <- sample(nrow(deckard), nrow(deckard), replace = TRUE)
+    nei_boot <- sample(nrow(neither), nrow(neither), replace = TRUE)
+    
+    neld <- nelson[nel_boot,]
+    deckd <- deckard[deck_boot,]
+    neid <- neither[nei_boot,]
+    
+    lm1 <- lm(ibuchanan ~ factor(isabs), data = neld)
+    lm2 <- lm(ibuchanan ~ factor(isabs), data = deckd)
+    lm3 <- lm(ibuchanan ~ factor(isabs), data = neid)
+    
+    nel_coefs[i,1] = lm1$coefficients[[1]]
+    nel_coefs[i,2] = lm1$coefficients[[1]]+lm1$coefficients[[2]]
+       
+    deck_coefs[i,1] = lm2$coefficients[[1]]
+    deck_coefs[i,2] = lm2$coefficients[[1]]+lm2$coefficients[[2]]
+    
+    nei_coefs[i,1] = lm3$coefficients[[1]]
+    nei_coefs[i,2] = lm3$coefficients[[1]]+lm3$coefficients[[2]]
+}
+```
+
+```{r,include=FALSE}
+ate<-nel_coefs[,1]*prob_nelson+deck_coefs[,1]*prob_deckard+nei_coefs[,1]*prob_neither-(nel_coefs[,2]*prob_nelson+deck_coefs[,2]*prob_deckard+nei_coefs[,2]*prob_neither)
+
+upper<-quantile(ate,0.975)*PBC$totalVotes
+lower<-quantile(ate,0.025)*PBC$totalVotes
+CI <- data.frame("2.5 %" = lower, "97.5 %" = upper) 
+colnames(CI) <- c("2.5 %", "97.5 %")
+CI
+```
+After using bootstrap to calculate the ajusted treatment effect, our 95% confidence interval is [2456.6,2932.1]. This indicates that 95% of the true increase in votes will fall within this range. Indeed, our calculation shows that 2717 falls within such range based on the causal effect of butterfly ballot
+
+# Conclusions
+
+**1**
+
+From our analysis, we can notice that **Buchanan receives a surprising high vote in PBC**. This is because our observation for PBC has fall outside of the confidence interval, and at the same time, the confidence interval does not include 0.
+
+**2**
+
+However, we do have to be aware of that this inference is still not safe. First of all, from our previous diagnostics we noticed that the residuals are not homoskedesticity. The linear relationship on the other hand is relatively weak, and there're many variables having strong collinearity so that we might underestimate the standard deviation if we were to use them to make predictions. Thus, it's very possible that we'll be violating our assumptions for linearity and homoskedesticity. Besides, the dataset also contain very few amount of data. Although we can do boostrap, we still hope that the sample size is large enough. Otherwise we won't impose many constraints on assumptions when boostrapping, which might result in higher bias. 
+
+**3**
+
+We can also conclude that we expect Buchanan to receive about 2717 more votes. 
+
+**4**
+
+However, this will only be possible if our assumptions for causal effects hold. One drawback is that our data comes from an observational study. Therefore, it's very unlikely to perform randomization and control for other confounding variables.
